@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Screencast Site — Simple (HTML/CSS/JS)</title>
+
+    <!--
+  Simple Screencast Site (single file)
+  - Uses navigator.mediaDevices.getDisplayMedia() for screen capture.
+  - Records via MediaRecorder and allows download as .webm.
+  - Shows recording timer and status.
+  - Dark mode toggle.
+  - Fallback: If getDisplayMedia is not available, shows message and offers camera fallback.
+  - NOTE: Some browsers (notably older iOS Safari) do not support getDisplayMedia.
+-->
+
+    <style>
+      :root {
+        --bg: #f7f8fb;
+        --card: #ffffff;
+        --text: #0f172a;
+        --muted: #6b7280;
+        --accent: #2563eb;
+        --danger: #ef4444;
+        --radius: 12px;
+        --shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+      }
+      .dark {
+        --bg: #071029;
+        --card: #071a2b;
+        --text: #e6eef8;
+        --muted: #94a3b8;
+        --accent: #60a5fa;
+        --danger: #fb7185;
+        --shadow: none;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+          Roboto, "Helvetica Neue";
+        background: var(--bg);
+        color: var(--text);
+        -webkit-font-smoothing: antialiased;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+      }
+      .wrap {
+        width: 100%;
+        max-width: 980px;
+      }
+      header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 14px;
+      }
+      h1 {
+        font-size: 1.1rem;
+        margin: 0;
+      }
+      .sub {
+        color: var(--muted);
+        font-size: 0.86rem;
+      }
+
+      .card {
+        background: var(--card);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+        padding: 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      #preview {
+        width: 100%;
+        height: 56vh;
+        background: #000;
+        border-radius: 10px;
+        object-fit: contain;
+        display: block;
+      }
+      @media (max-width: 600px) {
+        #preview {
+          height: 45vh;
+        }
+      }
+
+      .controls {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .btn {
+        padding: 10px 14px;
+        border-radius: 10px;
+        border: 1px solid rgba(15, 23, 42, 0.06);
+        background: linear-gradient(
+          180deg,
+          rgba(255, 255, 255, 0.9),
+          rgba(255, 255, 255, 0.82)
+        );
+        cursor: pointer;
+        font-weight: 600;
+      }
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .primary {
+        background: linear-gradient(180deg, var(--accent), #1e40af);
+        color: white;
+        border: 0;
+      }
+      .danger {
+        background: linear-gradient(180deg, var(--danger), #b91c1c);
+        color: white;
+        border: 0;
+      }
+      .muted {
+        background: transparent;
+        border: 1px solid rgba(15, 23, 42, 0.06);
+      }
+
+      .status-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .status {
+        font-weight: 700;
+      }
+      .recording-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: var(--danger);
+        box-shadow: 0 0 8px rgba(239, 68, 68, 0.35);
+      }
+      .timer {
+        font-family: monospace;
+        background: rgba(0, 0, 0, 0.04);
+        padding: 6px 8px;
+        border-radius: 8px;
+        color: var(--muted);
+      }
+
+      .help {
+        font-size: 0.9rem;
+        color: var(--muted);
+        line-height: 1.4;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      footer {
+        margin-top: 10px;
+        color: var(--muted);
+        font-size: 0.85rem;
+        text-align: center;
+      }
+
+      a.link {
+        color: var(--accent);
+        text-decoration: none;
+        font-weight: 600;
+      }
+
+      /* small responsive card actions */
+      .small-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <div>
+          <h1>Screencast Site — Simple</h1>
+          <div class="sub">
+            Screen share, record, and download. Works on desktop & many mobile
+            browsers.
+          </div>
+        </div>
+        <div class="toggle">
+          <label for="darkSwitch" class="sub">Dark</label>
+          <input
+            id="darkSwitch"
+            type="checkbox"
+            aria-label="Toggle dark mode"
+          />
+        </div>
+      </header>
+
+      <main class="card" role="main">
+        <!-- Video preview -->
+        <video id="preview" playsinline autoplay controls></video>
+
+        <!-- Controls -->
+        <div class="controls">
+          <button
+            id="shareBtn"
+            class="btn primary"
+            title="Start sharing your screen"
+          >
+            Start Screen Share
+          </button>
+          <button id="recordBtn" class="btn" disabled>Start Recording</button>
+          <button id="stopBtn" class="btn muted" disabled>Stop All</button>
+          <a
+            id="downloadLink"
+            class="btn muted"
+            style="display: none"
+            download="screencast.webm"
+            >Download Recording</a
+          >
+        </div>
+
+        <!-- Status & Timer -->
+        <div class="status-row">
+          <div id="statusText" class="status">Idle</div>
+          <div id="recordIndicator" style="display: none" class="row">
+            <div class="recording-dot" aria-hidden></div>
+            <div style="min-width: 60px" id="timer" class="timer">00:00</div>
+          </div>
+          <div
+            style="margin-left: auto; color: var(--muted)"
+            id="sizeInfo"
+          ></div>
+        </div>
+
+        <!-- Help & Fallback -->
+        <div class="help" id="helpBox">
+          <p id="supportMsg">Checking browser support for screen capture...</p>
+          <p id="hint" style="margin-top: 6px">
+            Tip: Screen sharing requires HTTPS or localhost. If your browser
+            denies permissions, allow "Screen" and "Microphone".
+          </p>
+          <div class="small-actions" id="fallbackActions" style="display: none">
+            <!-- Camera fallback button appears if getDisplayMedia is not available -->
+            <button id="cameraFallback" class="btn">
+              Use Camera (Fallback)
+            </button>
+          </div>
+        </div>
+      </main>
+
+      <footer>
+        <div>
+          Ready to deploy — upload this `index.html` to any static HTTPS host.
+        </div>
+        <div style="margin-top: 6px">
+          Note: iOS Safari may not support screen capture. See comments in code.
+        </div>
+      </footer>
+    </div>
+
+    <script>
+      /* ===========================
+   Screencast Site - JS Logic
+   - getDisplayMedia() for screen capture
+   - MediaRecorder for recording
+   - Fallback to getUserMedia camera (optional)
+   ============================ */
+
+      const shareBtn = document.getElementById("shareBtn");
+      const recordBtn = document.getElementById("recordBtn");
+      const stopBtn = document.getElementById("stopBtn");
+      const preview = document.getElementById("preview");
+      const downloadLink = document.getElementById("downloadLink");
+      const statusText = document.getElementById("statusText");
+      const recordIndicator = document.getElementById("recordIndicator");
+      const timerEl = document.getElementById("timer");
+      const sizeInfo = document.getElementById("sizeInfo");
+      const supportMsg = document.getElementById("supportMsg");
+      const fallbackActions = document.getElementById("fallbackActions");
+      const cameraFallbackBtn = document.getElementById("cameraFallback");
+      const darkSwitch = document.getElementById("darkSwitch");
+
+      let stream = null;
+      let mediaRecorder = null;
+      let recordedChunks = [];
+      let recordingStart = null;
+      let timerInterval = null;
+
+      // Dark mode toggle (simple)
+      darkSwitch.addEventListener("change", () => {
+        document.documentElement.classList.toggle("dark", darkSwitch.checked);
+      });
+
+      // Feature detection
+      const supportsGetDisplayMedia = !!(
+        navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia
+      );
+      if (supportsGetDisplayMedia) {
+        supportMsg.textContent = "Display capture supported in this browser.";
+      } else {
+        supportMsg.innerHTML =
+          "<strong>Screen sharing not supported on this device/browser.</strong> Please use Chrome on desktop or Android. (iOS Safari support is limited)";
+        fallbackActions.style.display = "block"; // show camera fallback option
+      }
+
+      // Start screen share (desktop preferred)
+      shareBtn.addEventListener("click", async () => {
+        // Reset any previous
+        stopAllTracks();
+
+        try {
+          // Try getDisplayMedia first (screen)
+          if (supportsGetDisplayMedia) {
+            stream = await navigator.mediaDevices.getDisplayMedia({
+              video: { cursor: "always" },
+              audio: true, // prompt for system audio where supported
+            });
+          } else {
+            throw new Error("getDisplayMedia not supported");
+          }
+
+          // Set preview
+          preview.srcObject = stream;
+          preview.play().catch(() => {
+            /* ignore play promise */
+          });
+          statusText.textContent = "Screen sharing — preview active";
+          recordBtn.disabled = false;
+          stopBtn.disabled = false;
+          downloadLink.style.display = "none";
+          sizeInfo.textContent = "";
+          // When user stops screen share via browser UI, cleanup automatically
+          stream.getVideoTracks().forEach((track) => {
+            track.addEventListener("ended", () => {
+              stopAllTracks();
+              statusText.textContent = "Screen sharing ended";
+            });
+          });
+        } catch (err) {
+          console.error("Screen share error", err);
+          statusText.textContent = "Screen share failed or blocked";
+          // Show helpful hint
+          alert(
+            "Screen sharing failed or was blocked. Make sure you are on HTTPS and allowed permission."
+          );
+        }
+      });
+
+      // Optional camera fallback for devices without getDisplayMedia
+      cameraFallbackBtn.addEventListener("click", async () => {
+        try {
+          stopAllTracks();
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: true,
+          });
+          preview.srcObject = stream;
+          preview.play().catch(() => {});
+          statusText.textContent =
+            "Using camera as fallback (not screen capture)";
+          recordBtn.disabled = false;
+          stopBtn.disabled = false;
+          downloadLink.style.display = "none";
+          sizeInfo.textContent = "";
+        } catch (err) {
+          console.error("Camera fallback failed", err);
+          alert("Unable to access camera/microphone. Check permissions.");
+        }
+      });
+
+      // Start / Stop recording
+      recordBtn.addEventListener("click", () => {
+        if (!mediaRecorder || mediaRecorder.state === "inactive")
+          startRecording();
+        else stopRecording();
+      });
+
+      stopBtn.addEventListener("click", () => {
+        stopAllTracks();
+        statusText.textContent = "Stopped";
+      });
+
+      // Start recording function
+      function startRecording() {
+        if (!stream) {
+          alert(
+            "No media stream available to record. Start screen share first."
+          );
+          return;
+        }
+
+        recordedChunks = [];
+        // Choose mimeType with fallback
+        let options = { mimeType: "video/webm;codecs=vp9,opus" };
+        if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+          options = { mimeType: "video/webm;codecs=vp8,opus" };
+          if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+            options = { mimeType: "video/webm" };
+          }
+        }
+
+        try {
+          mediaRecorder = new MediaRecorder(stream, options);
+        } catch (e) {
+          console.error("MediaRecorder error", e);
+          alert("Recording not supported in this browser.");
+          return;
+        }
+
+        mediaRecorder.ondataavailable = (ev) => {
+          if (ev.data && ev.data.size > 0) recordedChunks.push(ev.data);
+          // update size info live
+          const size = recordedChunks.reduce((s, b) => s + b.size, 0);
+          sizeInfo.textContent = size > 0 ? readableBytes(size) : "";
+        };
+
+        mediaRecorder.onstart = () => {
+          recordingStart = Date.now();
+          startTimer();
+          recordIndicator.style.display = "flex";
+          statusText.textContent = "Recording…";
+          recordBtn.textContent = "Stop Recording";
+          recordBtn.classList.add("danger");
+          downloadLink.style.display = "none";
+        };
+
+        mediaRecorder.onstop = () => {
+          stopTimer();
+          recordIndicator.style.display = "none";
+          statusText.textContent = "Recording stopped";
+          recordBtn.textContent = "Start Recording";
+          recordBtn.classList.remove("danger");
+
+          // Create blob and download link
+          const blob = new Blob(recordedChunks, { type: "video/webm" });
+          const url = URL.createObjectURL(blob);
+          downloadLink.href = url;
+          downloadLink.style.display = "inline-block";
+          const kb = Math.round(blob.size / 1024);
+          downloadLink.textContent = `Download Recording (${kb} KB)`;
+          sizeInfo.textContent = readableBytes(blob.size);
+        };
+
+        mediaRecorder.onerror = (ev) => {
+          console.error("Recorder error", ev);
+          alert("Recording error: " + ev.error);
+        };
+
+        mediaRecorder.start(1000); // collect data every 1s slices
+      }
+
+      // Stop recording
+      function stopRecording() {
+        if (mediaRecorder && mediaRecorder.state !== "inactive") {
+          mediaRecorder.stop();
+        }
+      }
+
+      // Stop and cleanup all tracks
+      function stopAllTracks() {
+        if (mediaRecorder && mediaRecorder.state !== "inactive") {
+          mediaRecorder.stop();
+        }
+        if (stream) {
+          stream.getTracks().forEach((t) => t.stop());
+        }
+        stream = null;
+        preview.srcObject = null;
+        recordBtn.disabled = true;
+        stopBtn.disabled = true;
+      }
+
+      // Timer helpers
+      function startTimer() {
+        timerEl.textContent = "00:00";
+        if (timerInterval) clearInterval(timerInterval);
+        timerInterval = setInterval(() => {
+          const diff = Date.now() - recordingStart;
+          timerEl.textContent = formatTime(diff);
+        }, 500);
+      }
+      function stopTimer() {
+        if (timerInterval) clearInterval(timerInterval);
+        timerInterval = null;
+      }
+      function formatTime(ms) {
+        const total = Math.floor(ms / 1000);
+        const s = total % 60;
+        const m = Math.floor(total / 60) % 60;
+        const h = Math.floor(total / 3600);
+        return (
+          (h > 0 ? String(h).padStart(2, "0") + ":" : "") +
+          String(m).padStart(2, "0") +
+          ":" +
+          String(s).padStart(2, "0")
+        );
+      }
+      function readableBytes(bytes) {
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + " KB";
+        return (bytes / (1024 * 1024)).toFixed(2) + " MB";
+      }
+
+      /* Accessibility: keyboard shortcuts (optional) */
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "r" && (e.ctrlKey || e.metaKey)) {
+          // Ctrl/Cmd + R to toggle recording (note: browser reload conflicts)
+          e.preventDefault();
+          if (!recordBtn.disabled) recordBtn.click();
+        }
+      });
+
+      /* NOTES:
+   - Some browsers (iOS Safari) may not support getDisplayMedia or system audio capture.
+   - For full screen audio capture on desktop, browsers differ in support.
+   - Host on HTTPS or use localhost for testing.
+*/
+    </script>
+  </body>
+</html>
