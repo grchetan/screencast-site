@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Screencast Site — P2P Sharing (HTML/CSS/JS)</title>
+    <title>Screencast Site — P2P (mobile-friendly)</title>
     <meta
       name="description"
-      content="High-quality P2P screen sharing using PeerJS with local recording and fallback to camera."
+      content="P2P screen share with auto camera fallback for mobile. Use Chrome on Android for screen sharing."
     />
     <style>
       :root {
@@ -163,17 +163,30 @@
         gap: 8px;
         align-items: center;
       }
+      .diag {
+        background: rgba(0, 0, 0, 0.04);
+        padding: 8px;
+        border-radius: 8px;
+        font-size: 0.82rem;
+        color: var(--muted);
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .warning {
+        color: var(--danger);
+        font-weight: 700;
+      }
     </style>
   </head>
-
   <body>
     <div class="wrap">
       <header>
         <div>
-          <h1>Screencast Site — P2P Enhanced</h1>
+          <h1>Screencast Site — P2P (mobile friendly)</h1>
           <div class="sub">
-            High-quality screen share between devices (laptop ↔ mobile). Use ID
-            to connect.
+            Best on Chrome (Android). If screen-share fails, camera fallback
+            auto-starts.
           </div>
         </div>
         <div class="row">
@@ -186,7 +199,9 @@
         </div>
       </header>
 
-      <main class="card" role="main">
+      <main class="card" role="main" aria-live="polite">
+        <div id="diagnostic" class="diag" aria-hidden="false"></div>
+
         <video id="localPreview" playsinline autoplay muted controls></video>
         <video id="remotePreview" playsinline autoplay controls></video>
 
@@ -206,11 +221,7 @@
               placeholder="Enter ID/Username"
             />
             <button id="joinBtn" class="btn primary">Join</button>
-            <button
-              id="createBtn"
-              class="btn muted"
-              title="Regenerate/Show my ID"
-            >
+            <button id="createBtn" class="btn muted" title="Show my ID">
               Show My ID
             </button>
           </div>
@@ -261,10 +272,10 @@
         </div>
 
         <div class="sub" id="helpBox">
-          <p id="supportMsg">Initializing P2P connection...</p>
+          <p id="supportMsg">Initializing...</p>
           <p style="margin-top: 6px">
-            Tip: Use HTTPS. Some mobile browsers do not support screen sharing;
-            use camera fallback if needed.
+            Tip: If the page is opened inside WhatsApp/Instagram, open it in the
+            Chrome browser (menu → Open in Browser) to allow screen sharing.
           </p>
           <div id="fallbackActions" style="display: none; margin-top: 6px">
             <button id="cameraFallback" class="btn">
@@ -276,17 +287,19 @@
 
       <footer>
         <div>
-          P2P via PeerJS. For best quality, use Chrome/Firefox. Requires HTTPS
-          or localhost.
+          P2P via PeerJS. Use Chrome (Android) for screen sharing. iOS Safari
+          and some in-app browsers don't support screen capture — camera
+          fallback will be used.
         </div>
       </footer>
     </div>
 
-    <!-- PeerJS CDN -->
+    <!-- PeerJS -->
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 
     <script>
-      // Elements
+      // ============ Elements ============
+      const diag = document.getElementById('diagnostic');
       const shareBtn = document.getElementById('shareBtn');
       const recordBtn = document.getElementById('recordBtn');
       const stopBtn = document.getElementById('stopBtn');
@@ -302,7 +315,6 @@
       const cameraFallbackBtn = document.getElementById('cameraFallback');
       const darkSwitch = document.getElementById('darkSwitch');
 
-      // P2P elements
       const joinBtn = document.getElementById('joinBtn');
       const createBtn = document.getElementById('createBtn');
       const peerIdInput = document.getElementById('peerIdInput');
@@ -311,7 +323,7 @@
       const copyIdBtn = document.getElementById('copyIdBtn');
       const connectionStatus = document.getElementById('connectionStatus');
 
-      // State
+      // ============ State ============
       let localStream = null;
       let mediaRecorder = null;
       let recordedChunks = [];
@@ -321,31 +333,49 @@
       let currentCall = null;
       let remotePeerId = null;
 
-      // Dark mode
+      // ============ Diagnostic Helpers ============
+      const ua = navigator.userAgent || '';
+      const isIOS = /iPhone|iPad|iPod/i.test(ua);
+      const isAndroid = /Android/i.test(ua);
+      const isInApp = /Whatsapp|FBAN|FBAV|Instagram|LinkedInApp|Twitter/i.test(
+        ua,
+      );
+      const supportsGetDisplayMedia = !!(
+        navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia
+      );
+
+      function updateDiag() {
+        diag.innerHTML = [
+          `<strong>UA:</strong> ${ua}`,
+          `<strong>getDisplayMedia:</strong> ${supportsGetDisplayMedia ? 'YES' : 'NO'}`,
+          `<strong>Platform:</strong> ${isIOS ? 'iOS' : isAndroid ? 'Android' : 'Desktop'}`,
+          isInApp
+            ? `<span class="warning">Detected in-app browser — open in Chrome for best results.</span>`
+            : '',
+        ].join(' • ');
+      }
+      updateDiag();
+
+      // If in-app, show hint and a small helper: open in browser link (user must do it)
+      if (isInApp) {
+        supportMsg.textContent =
+          'Detected in-app browser. Screen share may be blocked. Open this page in Chrome/Firefox for best results.';
+        fallbackActions.style.display = 'block';
+      }
+
+      // ============ Dark toggle ============
       darkSwitch.addEventListener('change', () => {
         document.documentElement.classList.toggle('dark', darkSwitch.checked);
       });
 
-      // Feature detection
-      const supportsGetDisplayMedia = !!(
-        navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia
-      );
-      if (supportsGetDisplayMedia) {
-        supportMsg.textContent = 'High-quality screen capture available.';
-      } else {
-        supportMsg.innerHTML =
-          '<strong>Screen sharing not supported:</strong> fallback to camera available.';
-        fallbackActions.style.display = 'block';
-      }
-
-      // Initialize PeerJS (simple default cloud broker)
+      // ============ PeerJS ============
       function initPeer() {
-        // Create peer with default host (PeerJS cloud). This will auto-generate an ID.
         try {
-          peer = new Peer(); // defaults should work for small demos
+          // default PeerJS cloud broker (small demos). For production, use your own signaling server.
+          peer = new Peer();
         } catch (err) {
-          console.error('PeerJS init error', err);
-          supportMsg.textContent = 'PeerJS init failed. Check network.';
+          console.error('Peer init failed', err);
+          supportMsg.textContent = 'PeerJS init failed';
           return;
         }
 
@@ -353,20 +383,19 @@
           myPeerId.textContent = id;
           myPeerIdSection.style.display = 'block';
           supportMsg.textContent = 'P2P ready. Share your ID!';
+          connectionStatus.style.display = 'none';
         });
 
         peer.on('error', (err) => {
-          console.error('Peer error:', err);
+          console.error('Peer error', err);
           supportMsg.textContent =
-            'P2P error: ' + (err && err.type ? err.type : err);
+            'P2P error: ' + (err && err.type ? err.type : String(err));
         });
 
-        // When someone connects via data (optional)
         peer.on('connection', (conn) => {
-          conn.on('data', (d) => console.log('Data received:', d));
+          conn.on('data', (d) => console.log('Data:', d));
         });
 
-        // Incoming call: answer with our localStream if we have one, else attempt audio fallback
         peer.on('call', async (call) => {
           console.log('Incoming call from', call.peer);
           currentCall = call;
@@ -376,20 +405,17 @@
 
           try {
             if (!localStream) {
-              // try to get audio to answer (so remote can hear us)
-              const audioStream = await navigator.mediaDevices
+              // try to supply audio when answering
+              const audio = await navigator.mediaDevices
                 .getUserMedia({ audio: true, video: false })
                 .catch(() => null);
-              if (audioStream) {
-                call.answer(audioStream);
-              } else {
-                call.answer(); // answer without media
-              }
+              if (audio) call.answer(audio);
+              else call.answer();
             } else {
               call.answer(localStream);
             }
           } catch (err) {
-            console.warn('Answer failed', err);
+            console.warn('Answering failed', err);
             try {
               call.answer();
             } catch (e) {}
@@ -398,10 +424,8 @@
         });
       }
 
-      // Setup visual handlers for a call
       function setupCallHandlers(call) {
         call.on('stream', (remoteStream) => {
-          console.log('Remote stream received');
           remotePreview.srcObject = remoteStream;
           remotePreview.play().catch(() => {});
           statusText.textContent = 'Remote stream active';
@@ -410,7 +434,6 @@
         });
 
         call.on('close', () => {
-          console.log('Call closed');
           remotePreview.srcObject = null;
           connectionStatus.textContent = 'Call ended';
           setTimeout(() => (connectionStatus.style.display = 'none'), 2000);
@@ -422,7 +445,6 @@
         });
       }
 
-      // Show or regenerate my ID (if peer not ready, re-init)
       createBtn.addEventListener('click', () => {
         if (!peer || peer.disconnected) {
           if (peer) peer.destroy();
@@ -446,10 +468,9 @@
         connectionStatus.textContent = 'Connecting to ' + id + '...';
         connectionStatus.style.color = 'var(--muted)';
 
-        // optional data connection
+        // data channel
         const conn = peer.connect(id);
         conn.on('open', () => {
-          console.log('Data channel open');
           conn.send({ hello: 'hi from ' + (peer.id || 'me') });
         });
         conn.on('error', () => {
@@ -457,13 +478,11 @@
           connectionStatus.style.color = 'var(--danger)';
         });
 
-        // Place outgoing call: prefer sending our localStream if available
+        // outgoing call: send localStream if available, else try get audio
         try {
           let outStream = null;
-          if (localStream) {
-            outStream = localStream;
-          } else {
-            // try to obtain a small audio stream so remote hears us (better UX)
+          if (localStream) outStream = localStream;
+          else {
             outStream = await navigator.mediaDevices
               .getUserMedia({ audio: true, video: false })
               .catch(() => null);
@@ -489,24 +508,26 @@
           .catch(() => alert('Clipboard not available'));
       });
 
-      // Start screen share
-      shareBtn.addEventListener('click', async () => {
+      // ============ Share screen (with auto camera fallback) ============
+      async function startScreenShareWithFallback(autoFallback = true) {
+        stopAllTracks();
+        statusText.textContent = 'Starting screen share...';
         try {
-          stopAllTracks(); // stop existing
-          if (supportsGetDisplayMedia) {
-            // Request screen with good constraints; exact values are "ideal"
-            localStream = await navigator.mediaDevices.getDisplayMedia({
-              video: {
-                width: { ideal: 1920 },
-                height: { ideal: 1080 },
-                frameRate: { ideal: 60 },
-              },
-              audio: true, // may or may not be supported depending on browser
-            });
-          } else {
+          if (!supportsGetDisplayMedia)
             throw new Error('getDisplayMedia not supported');
-          }
 
+          // getDisplayMedia must be called as a result of user gesture (button click)
+          const constraints = {
+            video: {
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              frameRate: { ideal: 30 },
+            },
+            audio: true, // some browsers allow system audio capture; many ignore this
+          };
+
+          const s = await navigator.mediaDevices.getDisplayMedia(constraints);
+          localStream = s;
           localPreview.srcObject = localStream;
           localPreview.play().catch(() => {});
           statusText.textContent = 'Screen sharing active';
@@ -515,7 +536,7 @@
           downloadLink.style.display = 'none';
           sizeInfo.textContent = '';
 
-          // If we already have a remote peer ID, call them with the screen stream
+          // If remote ID present, call the peer with screen
           if (remotePeerId && peer && peer.open) {
             try {
               currentCall = peer.call(remotePeerId, localStream);
@@ -525,54 +546,76 @@
             }
           }
 
-          // handle end of tracks (user stops share)
+          // handle user stopping the share
           localStream.getTracks().forEach((track) => {
             track.addEventListener('ended', () => {
+              // user clicked "Stop sharing" from browser UI
               stopAllTracks();
             });
           });
         } catch (err) {
-          console.error('Screen share error:', err);
-          alert(
-            'Screen sharing failed. Ensure you are on HTTPS and granted permissions. Using camera fallback is recommended.',
-          );
-          fallbackActions.style.display = 'block';
+          console.warn('Screen share failed:', err);
           statusText.textContent = 'Screen share failed';
+          fallbackActions.style.display = 'block';
+          // Inform user and optionally start camera fallback automatically
+          if (autoFallback) {
+            const msg = isIOS
+              ? 'Your browser/device likely does not support screen sharing. Starting camera fallback.'
+              : 'Screen share failed — starting camera fallback.';
+            // brief alert then start camera fallback
+            try {
+              alert(msg);
+            } catch (e) {}
+            // small delay for UX
+            setTimeout(() => cameraFallback(), 300);
+          }
         }
-      });
+      }
 
-      // Camera fallback
-      cameraFallbackBtn.addEventListener('click', async () => {
+      async function cameraFallback() {
+        stopAllTracks();
+        statusText.textContent = 'Starting camera...';
         try {
-          stopAllTracks();
-          localStream = await navigator.mediaDevices.getUserMedia({
+          const camConstraints = {
             video: {
               width: { ideal: 1280 },
               height: { ideal: 720 },
               frameRate: { ideal: 30 },
             },
             audio: true,
-          });
+          };
+          const s = await navigator.mediaDevices.getUserMedia(camConstraints);
+          localStream = s;
           localPreview.srcObject = localStream;
           localPreview.play().catch(() => {});
           statusText.textContent = 'Camera fallback active';
           recordBtn.disabled = false;
           stopBtn.disabled = false;
+          downloadLink.style.display = 'none';
+          sizeInfo.textContent = '';
+
           if (remotePeerId && peer) {
             try {
               currentCall = peer.call(remotePeerId, localStream);
               setupCallHandlers(currentCall);
-            } catch (e) {
-              console.warn('Call with camera fallback failed', e);
+            } catch (err) {
+              console.warn('Call with camera fallback failed', err);
             }
           }
         } catch (err) {
           console.error('Camera fallback error', err);
+          statusText.textContent = 'Camera not available';
           alert('Camera access denied or not available.');
         }
-      });
+      }
 
-      // Recording logic
+      // attach handlers to buttons
+      shareBtn.addEventListener('click', () =>
+        startScreenShareWithFallback(true),
+      );
+      cameraFallbackBtn.addEventListener('click', cameraFallback);
+
+      // ============ Recording ============
       recordBtn.addEventListener('click', () => {
         if (!localStream)
           return alert('Start sharing (screen/camera) before recording.');
@@ -592,13 +635,10 @@
           options = { mimeType: 'video/webm' };
 
         try {
-          // If you want to record both local+remote, you'd need to mix streams into a single MediaStream (not done here).
           mediaRecorder = new MediaRecorder(localStream, options);
         } catch (e) {
           console.warn('MediaRecorder init failed', e);
-          return alert(
-            'Recording not supported in this browser with chosen settings.',
-          );
+          return alert('Recording not supported with these settings.');
         }
 
         mediaRecorder.ondataavailable = (ev) => {
@@ -635,16 +675,15 @@
           alert('Recording error: ' + (ev.error || 'unknown'));
         };
 
-        mediaRecorder.start(200); // small timeslice
+        mediaRecorder.start(200);
       }
 
       function stopRecording() {
-        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        if (mediaRecorder && mediaRecorder.state !== 'inactive')
           mediaRecorder.stop();
-        }
       }
 
-      // Stop everything
+      // ============ Stop & cleanup ============
       function stopAllTracks() {
         try {
           stopRecording();
@@ -665,7 +704,7 @@
         statusText.textContent = 'Stopped';
       }
 
-      // Timer helpers
+      // ============ Timer helpers ============
       function startTimer() {
         timerEl.textContent = '00:00';
         if (timerInterval) clearInterval(timerInterval);
@@ -699,12 +738,10 @@
         return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
       }
 
-      // Init
-      initPeer();
+      // ============ Init and cleanup ============
+      initPeer(); // start PeerJS and display ID when ready
+      updateDiag(); // initial diagnostic text
 
-      // Provide basic UX: enable record when stream present via mutation/observer is cumbersome; we enable/disable in code where stream changes.
-
-      // Clean up
       window.addEventListener('beforeunload', () => {
         try {
           if (peer) peer.destroy();
@@ -712,12 +749,13 @@
         stopAllTracks();
       });
 
-      // Small improvements: show/hide fallback UI when needed
-      if (!supportsGetDisplayMedia) {
-        fallbackActions.style.display = 'block';
-      } else {
-        fallbackActions.style.display = 'none';
-      }
+      // expose for debugging from console
+      window._screencast = {
+        startScreenShareWithFallback,
+        cameraFallback,
+        initPeer,
+        stopAllTracks,
+      };
     </script>
   </body>
 </html>
